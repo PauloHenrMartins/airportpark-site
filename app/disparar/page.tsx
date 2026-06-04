@@ -40,9 +40,10 @@ export default function DispararPage() {
         .order("lista", { ascending: true });
 
       if (data) {
-        const unique = [
-          ...new Set(data.map((r: { lista: number }) => r.lista)),
-        ];
+        const unique = data
+          .map((r: { lista: number }) => r.lista)
+          .filter((v: number, i: number, a: number[]) => a.indexOf(v) === i)
+          .sort((a: number, b: number) => a - b);
         setListas(unique);
         if (unique.length > 0) {
           setForm((prev) => ({ ...prev, lista: String(unique[0]) }));
