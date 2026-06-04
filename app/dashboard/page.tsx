@@ -203,7 +203,8 @@ export default function DashboardPage() {
             <div className="p-5">
               {!awsMetrics && !awsLoading && (
                 <p className="text-sm text-gray-400 text-center py-4">
-                  Clique em "Atualizar" para carregar as métricas do CloudWatch.
+                  Clique em &quot;Atualizar&quot; para carregar as métricas do
+                  CloudWatch.
                 </p>
               )}
               {awsLoading && (
