@@ -59,10 +59,32 @@ export default function DispararPage() {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   }
 
+  async function validarProvedores(lista: string): Promise<boolean> {
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("lista_provedores")
+      .select("id")
+      .eq("lista", Number(lista))
+      .eq("permitido", true)
+      .limit(1);
+
+    return !!(data && data.length > 0);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setStatus("loading");
     setMessage("");
+
+    // Valida provedores antes de disparar
+    const provedoresOk = await validarProvedores(form.lista);
+    if (!provedoresOk) {
+      setStatus("error");
+      setMessage(
+        `Lista ${form.lista} sem provedores configurados. Configure em Provedores antes de disparar.`,
+      );
+      return;
+    }
 
     const webhookUrl = process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL;
     const apiKey = process.env.NEXT_PUBLIC_N8N_API_KEY;

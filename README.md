@@ -1,63 +1,60 @@
-# AIRPORTPARK-SITE
+﻿# AIRPORTPARK-SITE
 
 ## Visão Geral
 
-AIRPORTPARK-SITE é uma aplicação web interna construída com Next.js 14 e Supabase para gerenciar disparos de e-mail marketing. O sistema oferece:
+AIRPORTPARK-SITE é uma aplicação interna de controle de disparos de email marketing com foco em aquecimento de domínio e monitoramento de métricas. O sistema une Next.js 14, Supabase e AWS SES para:
 
-- autenticação email/senha via Supabase;
-- dashboard com métricas de envios, status e histórico;
-- formulário de disparo que aciona um webhook n8n;
-- controle de sessão com navegação protegida;
-- interface responsiva e focada em operações administrativas.
+- autenticar usuários por email/senha;
+- visualizar métricas de envio e reputação;
+- disparar volumes por lista via webhook n8n;
+- acompanhar o progresso por lista e por lote;
+- operar a partir de uma interface leve, responsiva e protegida.
 
-O foco atual é monitorar envios de `email_lista`, observar resultados de sucesso/erro e iniciar fluxos de disparo via webhook.
+O fluxo principal do produto é iniciar uma campanha de disparo e acompanhar o comportamento de `email_lista` através de métricas internas e dados AWS.
 
-## Estrutura do Projeto
+## Arquitetura do Projeto
 
 - `app/`
-  - `page.tsx` — redireciona para `/dashboard`;
-  - `dashboard/page.tsx` — dashboard principal com métricas, gráfico e listagem paginada de registros;
-  - `disparar/page.tsx` — formulário de disparo para iniciar o fluxo de envio;
-  - `login/page.tsx` — tela de login;
-  - `layout.tsx` — layout base da aplicação;
-  - `globals.css` — estilos globais com Tailwind CSS.
+  - `page.tsx` — redireciona automaticamente para `/dashboard`;
+  - `dashboard/page.tsx` — dashboard principal com resumo, gráfico, métricas AWS e progresso por lista/lote;
+  - `disparar/page.tsx` — formulário de disparo com seletores dinâmicos de lista e tabela de referência;
+  - `login/page.tsx` — tela de login para autenticação Supabase;
+  - `layout.tsx` — layout global da aplicação;
+  - `globals.css` — estilos base com Tailwind CSS.
+- `app/api/metrics/route.ts` — rota de API server-side para buscar métricas AWS SES do CloudWatch.
 - `components/`
-  - `AuthGuard.tsx` — protege páginas autenticadas;
-  - `Sidebar.tsx` — navegação lateral com logout;
+  - `AuthGuard.tsx` — proteção de rotas client-side que redireciona usuários não autenticados;
+  - `Sidebar.tsx` — navegação lateral com logo, itens de menu e drawer móvel.
 - `lib/`
-  - `supabase.ts` — cliente Supabase compartilhado;
-  - `utils.ts` — helper `cn` para classes CSS.
-- `public/` — recursos estáticos (logo, imagens, etc.).
+  - `supabase.ts` — cliente compartilhado Supabase usando `createBrowserClient`;
+- `public/` — assets estáticos, incluindo o logo do AirportPark.
 
-## Tecnologias
+## Tecnologias Principais
 
 - Next.js 14 (App Router)
 - React 18
 - TypeScript
-- Supabase (`@supabase/ssr`, `@supabase/supabase-js`, `@supabase/auth-helpers-nextjs`)
+- Supabase
+- AWS SDK para JavaScript (`@aws-sdk/client-cloudwatch`)
 - Tailwind CSS
 - Recharts
-- Lucide icons
-- clsx + tailwind-merge
+- Lucide Icons
 
 ## Fluxo de Autenticação
 
-A aplicação utiliza autenticação Supabase em client-side:
+O login é feito no cliente com Supabase:
 
-- `login/page.tsx` chama `supabase.auth.signInWithPassword({ email, password })`;
-- `AuthGuard.tsx` valida a sessão atual via `supabase.auth.getSession()` e redireciona para `/login` quando não autenticado;
-- `Sidebar.tsx` executa `supabase.auth.signOut()` e volta para `/login`.
+- `/login` autentica via `supabase.auth.signInWithPassword`;
+- `AuthGuard` verifica a sessão com `supabase.auth.getSession()` e força redirecionamento para `/login` se não houver sessão;
+- `Sidebar` faz `supabase.auth.signOut()` e envia o usuário para a tela de login.
 
-### Observações de segurança
+> Observação: a proteção é client-side. Para maior segurança, recomenda-se migrar para validação server-side ou middleware em futuras versões.
 
-- A autenticação é verificada apenas no cliente.
-- Para maior segurança no futuro, vale mover validação para rotas server-side e utilizar middlewares ou `@supabase/auth-helpers-nextjs` com SSR.
+## Modelo de Dados
 
-## Dados e Modelo Principal
+A base de dados principal é a tabela Supabase `email_lista`.
 
-O sistema trabalha com a tabela `email_lista` do Supabase.
-
-### Tipagem esperada (`EmailLista`)
+### Estrutura esperada de `EmailLista`
 
 - `id: string`
 - `email: string`
@@ -67,133 +64,191 @@ O sistema trabalha com a tabela `email_lista` do Supabase.
 - `feedback: Record<string, unknown> | null`
 - `created_at: string`
 
-### Status
+### Interpretação de status
 
-- `success` — envio confirmado;
-- `error` — envio com falha;
-- `null` — pendente / ainda não enviado.
+- `success` — email enviado com sucesso;
+- `error` — envio apresentou erro;
+- `null` — pendente ou ainda não processado.
 
-## Páginas e Funcionalidades
+## Visão Geral das Páginas
 
 ### `/dashboard`
 
-- exibe métricas resumidas de envios com contagem de sucesso, erro e pendentes;
-- gera gráfico de disparos dos últimos 30 dias;
-- lista registros paginados em blocos de 20;
-- ordena por `created_at` decrescente;
-- usa `AuthGuard` e `Sidebar`.
+O dashboard é a página central de monitoramento e exibe:
+
+- cards de resumo com totais de enviados, pendentes e com erro;
+- gráfico de barras de disparos dos últimos 30 dias, calculado a partir de `enviado_em`;
+- bloco de métricas AWS SES/CloudWatch para reputação de envio;
+- tabela de progresso por lista com expansão para lotes detalhados.
+
+#### Progresso por Lista e Lotes
+
+A tabela principal usa duas funções RPC no Supabase:
+
+- `get_stats_por_lista()` — retorna métricas agregadas por `lista`:
+  - `lista`, `total`, `enviados`, `pendentes`, `erros`;
+- `get_lotes_por_lista()` — retorna lotes por `lista` e `enviado_em`:
+  - `lista`, `enviado_em`, `total`, `enviados`, `erros`.
+
+A cada linha da lista é possível expandir o detalhe de lotes para ver:
+
+- data/hora de envio do lote;
+- total do lote;
+- quantidade de sucesso;
+- quantidade de erro;
+- taxa de sucesso em porcentagem.
 
 ### `/disparar`
 
-- formulário de entrada para `lista`, `volume` e `assunto`;
-- usa webhook configurado em `NEXT_PUBLIC_N8N_WEBHOOK_URL`;
-- envia JSON para n8n com payload:
-  - `lista: Number(form.lista)`
-  - `volume: Number(form.volume)`
-  - `assunto: form.assunto`
-- adiciona cabeçalho `x-api-key` apenas se `NEXT_PUBLIC_N8N_API_KEY` estiver definido;
-- exibe mensagens de sucesso ou erro.
+A página de disparo permite iniciar fluxos de envio para listas existentes.
+
+Funcionalidades:
+
+- busca dinâmicamente as listas (`lista`) disponíveis em `email_lista`;
+- preenche o seletor com as listas encontradas e define o primeiro valor disponível como padrão;
+- permite enviar um volume numérico de emails por lista;
+- dispara um POST para o webhook n8n configurado;
+- exibe feedback de sucesso ou erro ao usuário;
+- traz a tabela de referência da Fase 1 e métricas de abertura/spam para contextualizar o envio.
+
+> Observação: o campo `assunto` foi removido; o payload enviado ao webhook contém apenas `lista` e `volume`.
 
 ### `/login`
 
-- tela de login simples;
-- valida credenciais diretamente com Supabase.
+A tela de login é minimalista e usa email e senha.
 
-## Integrações
+- não há fluxo de cadastro ou recuperação de senha implementado;
+- usuários devem ser criados diretamente no Supabase.
 
-### Supabase
+## Integração AWS SES / CloudWatch
 
-- URL e chave anon são fornecidos via variáveis de ambiente:
-  - `NEXT_PUBLIC_SUPABASE_URL`
-  - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- o cliente é criado com `createBrowserClient` de `@supabase/ssr`.
-- a aplicação faz consultas diretas usando `supabase.from("email_lista")`.
+A aplicação contém uma rota de API interna em `app/api/metrics/route.ts` que consulta métricas AWS SES no CloudWatch.
 
-### n8n
+### O que é coletado
 
-- webhook acionado por `app/disparar/page.tsx`:
-  - `process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL`
-  - `process.env.NEXT_PUBLIC_N8N_API_KEY` (opcional)
-- se o webhook não estiver configurado, o usuário vê mensagem de erro local.
+A rota `GET /api/metrics` consulta os seguintes metrics do namespace `AWS/SES`:
+
+- `Send`
+- `Delivery`
+- `Open`
+- `Click`
+- `Bounce`
+- `Complaint`
+
+Cada métrica é solicitada com `GetMetricStatisticsCommand` e estatística `Sum` para os últimos 30 dias.
+
+### Como são calculadas as taxas
+
+A partir dos valores retornados pela AWS, o backend calcula:
+
+- `deliveryRate = deliveries / sends`
+- `openRate = opens / deliveries`
+- `clickRate = clicks / deliveries`
+- `bounceRate = bounces / sends`
+- `complaintRate = complaints / sends`
+
+Os resultados são enviados para o cliente como porcentagens formatadas.
+
+### Uso no Dashboard
+
+O dashboard mostra:
+
+- `Enviados` — total de envios `Send`;
+- `Entregues` — taxa de entrega;
+- `Abertura` — taxa de abertura;
+- `Bounce` — taxa de bounce;
+- `Reclamação` — taxa de complaint.
+
+Também há um botão de atualizar que consulta novamente a rota `/api/metrics` e atualiza os cards.
+
+### Requisitos de ambiente AWS
+
+A rota depende das variáveis de ambiente:
+
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_REGION` (padrão `sa-east-1` se não definido)
+
+Essas credenciais são usadas apenas no servidor para autenticar a chamada ao CloudWatch.
+
+## Integração n8n
+
+O disparo em `app/disparar/page.tsx` envia uma requisição POST para o webhook configurado em:
+
+- `NEXT_PUBLIC_N8N_WEBHOOK_URL`
+
+Opcionalmente, adiciona o header:
+
+- `x-api-key: NEXT_PUBLIC_N8N_API_KEY`
+
+O payload atual enviado pelo cliente é:
+
+```json
+{ "lista": Number(form.lista), "volume": Number(form.volume) }
+```
+
+Se o webhook não estiver configurado, o formulário exibe erro local e não tenta disparar.
+
+## Estrutura de Login e Sessão
+
+- `AuthGuard.tsx` bloqueia o acesso a `/dashboard` e `/disparar` para usuários não autenticados.
+- `Sidebar.tsx` exibe o menu e o botão de logout.
+- no mobile, o sidebar usa um drawer com botão hamburguer e overlay.
+
+## Dependências Relevantes
+
+- `@aws-sdk/client-cloudwatch`
+- `@supabase/auth-helpers-nextjs`
+- `@supabase/ssr`
+- `@supabase/supabase-js`
+- `recharts`
+- `lucide-react`
+- `tailwindcss`
 
 ## Variáveis de Ambiente
 
-Crie um arquivo `.env.local` com pelo menos:
+Crie ou atualize `.env.local` com:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://seu-projeto.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=anonimo-chave
 NEXT_PUBLIC_N8N_WEBHOOK_URL=https://seu-n8n.com/webhook/...
 NEXT_PUBLIC_N8N_API_KEY=seu-token-opcional
+AWS_ACCESS_KEY_ID=sua_access_key
+AWS_SECRET_ACCESS_KEY=sua_secret_key
+AWS_REGION=sa-east-1
 ```
 
-### Importante
+> Importante: não compartilhe essas chaves e não as comite em repositórios públicos.
 
-- Não suba chaves para o repositório.
-- `NEXT_PUBLIC_...` torna as variáveis visíveis no cliente.
-- Armazene credenciais sensíveis com cuidado.
+## Scripts Disponíveis
 
-## Scripts
+- `npm install` — instala dependências;
+- `npm run dev` — inicia o servidor de desenvolvimento;
+- `npm run build` — constrói para produção;
+- `npm run start` — executa a build de produção;
+- `npm run lint` — executa lint.
 
-- `npm run dev` — inicia servidor de desenvolvimento;
-- `npm run build` — gera build de produção;
-- `npm run start` — executa aplicação em modo de produção;
-- `npm run lint` — executa ESLint.
-
-## Setup Inicial
+## Como Rodar
 
 1. Instale dependências:
    ```bash
    npm install
    ```
-2. Crie `.env.local` com as variáveis acima.
-3. Inicie em modo de desenvolvimento:
+2. Defina as variáveis de ambiente em `.env.local`.
+3. Rode:
    ```bash
    npm run dev
    ```
 4. Acesse `http://localhost:3000`.
 
-## Pontos de Extensão e Planejamento de Novas Features
+## Recomendações Operacionais
 
-### Melhorias de arquitetura
-
-- adicionar APIs internas (`/api/*`) para evitar chamadas diretas ao webhook n8n a partir do cliente;
-- centralizar chamadas Supabase em serviços e modules reutilizáveis;
-- utilizar middlewares de autenticação ou SSR para proteger melhor rotas;
-- aplicar roles/permissions no Supabase para separar administração de supervisão.
-
-### Funcionalidades desejadas
-
-- filtro por `status`, `lista` e intervalo de datas no dashboard;
-- pesquisa por email e exportação de CSV;
-- reenvio manual de emails com falha;
-- histórico completo de disparos com timestamps de processamento;
-- alertas de falha e retry automático para envios erro;
-- separação de ambientes (`dev`, `staging`, `prod`) no Supabase e no n8n.
-
-### Operacional
-
-- criar documentação de processo para cada `lista` e `planilha` usada;
-- mapear regras de negócio do `Plan 16`, `Plan 17`, `Plan 18` e volumes aprovados;
-- validar o payload aceito pelo fluxo n8n e negociar contrato do webhook;
-- adicionar testes unitários e componentes.
-
-## Observações Importantes
-
-- Atualmente, a proteção de sessão é implementada no cliente com `AuthGuard`.
-- O envio de disparos ocorre diretamente do browser para o webhook n8n.
-- A tabela `email_lista` é a fonte única de verdade para métricas e status.
-- O projeto assume que os registros de disparo já estão sendo inseridos no Supabase por um fluxo externo.
-
-## Checklist para Novas Features
-
-1. mapear a necessidade com o negócio e a regra de envio;
-2. validar se o recurso deve ser implementado no cliente ou backend;
-3. evitar expor segredos e webhooks no frontend;
-4. usar rotas API para orquestrar n8n / Supabase sempre que possível;
-5. garantir testes e revisão do fluxo de autenticação;
-6. documentar novas variáveis de ambiente e mudanças de esquema.
+- Mantenha as funções SQL no Supabase atualizadas para `get_stats_por_lista` e `get_lotes_por_lista`.
+- Use o dashboard para avaliar envio por lista e identificar lotes com erro.
+- Monitore as métricas AWS SES para reputação e bounce/complaint.
+- Não exponha chaves AWS ou webhook em repositórios públicos.
 
 ---
 
-Para qualquer expansão do sistema, mantenha este README atualizado com novas integrações, endpoints, tabelas e comportamentos esperados.
+Este README está alinhado com a implementação atual do projeto e descreve o fluxo de dados, as integrações e os pontos de operação principais.

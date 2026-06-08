@@ -15,3 +15,11 @@ export type EmailLista = {
   feedback: Record<string, unknown> | null;
   created_at: string;
 };
+
+export type ListaProvedor = {
+  id: string;
+  lista: number;
+  dominio: string;
+  permitido: boolean;
+  created_at: string;
+};

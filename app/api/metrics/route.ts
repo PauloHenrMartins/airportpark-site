@@ -12,7 +12,7 @@ const client = new CloudWatchClient({
   },
 });
 
-async function getMetric(metricName: string, days = 30) {
+async function getMetric(metricName: string, days = 30): Promise<number> {
   const EndTime = new Date();
   const StartTime = new Date();
   StartTime.setDate(StartTime.getDate() - days);
@@ -20,15 +20,17 @@ async function getMetric(metricName: string, days = 30) {
   const cmd = new GetMetricStatisticsCommand({
     Namespace: "AWS/SES",
     MetricName: metricName,
+    Dimensions: [{ Name: "campaign", Value: "airportpark" }],
     StartTime,
     EndTime,
-    Period: days * 86400,
+    Period: 86400, // 1 dia por datapoint — CloudWatch não aceita mais que isso
     Statistics: ["Sum"],
   });
 
   try {
     const res = await client.send(cmd);
-    return res.Datapoints?.[0]?.Sum ?? 0;
+    // Soma todos os datapoints do período (um por dia)
+    return res.Datapoints?.reduce((acc, dp) => acc + (dp.Sum ?? 0), 0) ?? 0;
   } catch {
     return 0;
   }
