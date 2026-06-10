@@ -99,7 +99,6 @@ export default function DashboardPage() {
   const [hetrixError, setHetrixError] = useState(false);
   const [suppressionData, setSuppressionData] = useState<SuppressionData>(null);
   const [suppressionLoading, setSuppressionLoading] = useState(true);
-  const [suppressionError, setSuppressionError] = useState(false);
 
   const supabase = createClient();
 
@@ -197,14 +196,13 @@ export default function DashboardPage() {
 
   const fetchSuppression = useCallback(async () => {
     setSuppressionLoading(true);
-    setSuppressionError(false);
     try {
       const res = await fetch("/api/suppression");
       if (!res.ok) throw new Error();
       const data = await res.json();
       setSuppressionData(data);
     } catch {
-      setSuppressionError(true);
+      // silencia erro — métrica Suprimidos usa 0 quando dados indisponíveis
     } finally {
       setSuppressionLoading(false);
     }
