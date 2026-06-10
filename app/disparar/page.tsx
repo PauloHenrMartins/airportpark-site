@@ -9,11 +9,11 @@ import { createClient } from "@/lib/supabase";
 import { fetchListasDisponiveis } from "@/lib/fetch-listas";
 
 const fase1Rows = [
-  { dia: "Dia 1", volume: 20, planilha: "Plan 16", acumulado: 20 },
-  { dia: "Dias 2–3", volume: 50, planilha: "Plan 16", acumulado: 120 },
-  { dia: "Dias 4–7", volume: 100, planilha: "Plan 16", acumulado: 520 },
-  { dia: "Dias 8–11", volume: 150, planilha: "Plan 16", acumulado: 1120 },
-  { dia: "Dias 12–14", volume: 200, planilha: "Plan 16", acumulado: 1720 },
+  { dia: "Dia 1", volume: 20 },
+  { dia: "Dias 2–3", volume: 50 },
+  { dia: "Dias 4–7", volume: 100 },
+  { dia: "Dias 8–11", volume: 150 },
+  { dia: "Dias 12–14", volume: 200 },
 ];
 
 type FormState = {
@@ -143,7 +143,7 @@ export default function DispararPage() {
               <table className="min-w-full divide-y divide-gray-200 text-sm">
                 <thead className="bg-gray-50">
                   <tr>
-                    {["Dia", "Volume/dia", "Planilha", "Acumulado"].map((h) => (
+                    {["Dia", "Volume/dia"].map((h) => (
                       <th
                         key={h}
                         className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
@@ -160,12 +160,6 @@ export default function DispararPage() {
                         {row.dia}
                       </td>
                       <td className="px-3 py-2 text-gray-700">{row.volume}</td>
-                      <td className="px-3 py-2 text-gray-700">
-                        {row.planilha}
-                      </td>
-                      <td className="px-3 py-2 text-gray-700">
-                        {row.acumulado.toLocaleString("pt-BR")}
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -177,28 +171,6 @@ export default function DispararPage() {
                 Plan 16 esgota (~1.932 emails). Sobra uma margem — use para
                 reenvio de quem não abriu.
               </p>
-            </div>
-          </div>
-
-          {/* Metric cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-            <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-              <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
-                Emails usados
-              </p>
-              <p className="text-xl font-bold text-gray-900">1.932</p>
-            </div>
-            <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-              <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
-                Meta abertura
-              </p>
-              <p className="text-xl font-bold text-green-700">&gt; 30%</p>
-            </div>
-            <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-              <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
-                Meta spam
-              </p>
-              <p className="text-xl font-bold text-red-600">&lt; 0,3%</p>
             </div>
           </div>
 

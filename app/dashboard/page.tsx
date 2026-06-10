@@ -48,6 +48,15 @@ type LoteStat = {
   erros: number;
 };
 
+type QuantidadeStat = {
+  lista: number;
+  para_enviar: number;
+  enviados: number;
+  erros: number;
+  invalidos: number;
+  duplicatas: number;
+};
+
 type HetrixData = {
   domain: string;
   label: string;
@@ -71,7 +80,9 @@ type SuppressionData = {
 export default function DashboardPage() {
   const [successCount, setSuccessCount] = useState(0);
   const [errorCount, setErrorCount] = useState(0);
-  const [pendingCount, setPendingCount] = useState(0);
+  const [paraEnviarCount, setParaEnviarCount] = useState(0);
+  const [duplicatasCount, setDuplicatasCount] = useState(0);
+  const [invalidosCount, setInvalidosCount] = useState(0);
   const [chartData, setChartData] = useState<DayCount[]>([]);
   const [loading, setLoading] = useState(true);
   const [awsMetrics, setAwsMetrics] = useState<AwsMetrics>(null);
@@ -79,6 +90,8 @@ export default function DashboardPage() {
   const [listaStats, setListaStats] = useState<ListaStat[]>([]);
   const [listaLoading, setListaLoading] = useState(true);
   const [loteStats, setLoteStats] = useState<LoteStat[]>([]);
+  const [quantidadeStats, setQuantidadeStats] = useState<QuantidadeStat[]>([]);
+  const [quantidadeLoading, setQuantidadeLoading] = useState(true);
   const [expandedListas, setExpandedListas] = useState<Set<number>>(new Set());
   const [bounceTooltip, setBounceTooltip] = useState(false);
   const [hetrixData, setHetrixData] = useState<HetrixData>(null);
@@ -87,28 +100,39 @@ export default function DashboardPage() {
   const [suppressionData, setSuppressionData] = useState<SuppressionData>(null);
   const [suppressionLoading, setSuppressionLoading] = useState(true);
   const [suppressionError, setSuppressionError] = useState(false);
-  const [suppressionExpanded, setSuppressionExpanded] = useState(false);
 
   const supabase = createClient();
 
   const fetchStats = useCallback(async () => {
-    const [successRes, errorRes, pendingRes] = await Promise.all([
-      supabase
-        .from("email_lista")
-        .select("id", { count: "exact", head: true })
-        .eq("status", "success"),
-      supabase
-        .from("email_lista")
-        .select("id", { count: "exact", head: true })
-        .eq("status", "error"),
-      supabase
-        .from("email_lista")
-        .select("id", { count: "exact", head: true })
-        .is("enviado_em", null),
-    ]);
+    const [successRes, errorRes, paraEnviarRes, duplicatasRes, invalidosRes] =
+      await Promise.all([
+        supabase
+          .from("email_lista")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "success"),
+        supabase
+          .from("email_lista")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "error"),
+        supabase
+          .from("email_lista")
+          .select("id", { count: "exact", head: true })
+          .is("enviado_em", null)
+          .is("status", null),
+        supabase
+          .from("email_lista")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "duplicate"),
+        supabase
+          .from("email_lista")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "invalid"),
+      ]);
     setSuccessCount(successRes.count ?? 0);
     setErrorCount(errorRes.count ?? 0);
-    setPendingCount(pendingRes.count ?? 0);
+    setParaEnviarCount(paraEnviarRes.count ?? 0);
+    setDuplicatasCount(duplicatasRes.count ?? 0);
+    setInvalidosCount(invalidosRes.count ?? 0);
   }, [supabase]);
 
   const fetchChart = useCallback(async () => {
@@ -207,6 +231,17 @@ export default function DashboardPage() {
     }
   }, [supabase]);
 
+  const fetchQuantidadeStats = useCallback(async () => {
+    try {
+      const { data } = await supabase.rpc("get_quantidade_por_lista");
+      setQuantidadeStats(data ?? []);
+    } catch {
+      // silencia erro
+    } finally {
+      setQuantidadeLoading(false);
+    }
+  }, [supabase]);
+
   function toggleLista(lista: number) {
     setExpandedListas((prev) => {
       const next = new Set(prev);
@@ -231,12 +266,20 @@ export default function DashboardPage() {
         fetchChart(),
         fetchListaStats(true),
         fetchLoteStats(),
+        fetchQuantidadeStats(),
       ]);
       setLoading(false);
     }
 
     void init();
-  }, [fetchStats, fetchChart, fetchListaStats, fetchLoteStats, fetchSuppression]);
+  }, [
+    fetchStats,
+    fetchChart,
+    fetchListaStats,
+    fetchLoteStats,
+    fetchQuantidadeStats,
+    fetchSuppression,
+  ]);
 
   return (
     <AuthGuard>
@@ -280,7 +323,7 @@ export default function DashboardPage() {
                 </p>
               )}
               {awsMetrics && !awsLoading && (
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
                   <div className="text-center">
                     <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
                       Enviados
@@ -369,6 +412,22 @@ export default function DashboardPage() {
                       {awsMetrics.complaintRate}%
                     </p>
                   </div>
+                  <div className="text-center">
+                    <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
+                      Suprimidos
+                    </p>
+                    <p
+                      className={`text-2xl font-bold ${
+                        suppressionLoading
+                          ? "text-gray-300"
+                          : (suppressionData?.total ?? 0) === 0
+                            ? "text-green-600"
+                            : "text-red-600"
+                      }`}
+                    >
+                      {suppressionLoading ? "—" : (suppressionData?.total ?? 0)}
+                    </p>
+                  </div>
                 </div>
               )}
             </div>
@@ -452,139 +511,8 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Card Suppression List — AWS SES */}
-          <div className="bg-white border border-gray-200 rounded-lg shadow-sm mb-6">
-            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between flex-wrap gap-2">
-              <div>
-                <h2 className="text-sm font-semibold text-gray-900">
-                  Suprimidos — AWS SES
-                </h2>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Emails bloqueados por bounce ou reclamação
-                </p>
-              </div>
-            </div>
-
-            <div className="px-4 py-4">
-              {suppressionLoading && (
-                <p className="text-sm text-gray-400">Carregando...</p>
-              )}
-
-              {suppressionError && !suppressionLoading && (
-                <p className="text-sm text-red-600">
-                  Erro ao carregar suppression list.
-                </p>
-              )}
-
-              {!suppressionLoading && !suppressionError && suppressionData && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      suppressionData.total > 0 &&
-                      setSuppressionExpanded((prev) => !prev)
-                    }
-                    className={`w-full flex items-center justify-between py-2 ${
-                      suppressionData.total > 0
-                        ? "cursor-pointer hover:bg-gray-50"
-                        : "cursor-default"
-                    } rounded-md px-2 transition-colors`}
-                  >
-                    <div className="flex items-center gap-2">
-                      {suppressionData.total > 0 && (
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className={`text-gray-400 transition-transform ${
-                            suppressionExpanded ? "rotate-90" : ""
-                          }`}
-                        >
-                          <path d="m9 18 6-6-6-6" />
-                        </svg>
-                      )}
-                      <span className="text-sm font-medium text-gray-700">
-                        Total suprimidos
-                      </span>
-                    </div>
-                    <span
-                      className={`text-sm font-bold ${
-                        suppressionData.total === 0
-                          ? "text-green-600"
-                          : "text-red-600"
-                      }`}
-                    >
-                      {suppressionData.total}
-                    </span>
-                  </button>
-
-                  {suppressionExpanded && suppressionData.total > 0 && (
-                    <div className="mt-2 overflow-x-auto">
-                      <table className="min-w-full divide-y divide-gray-200 text-sm">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            {["Email", "Motivo", "Data"].map((h) => (
-                              <th
-                                key={h}
-                                className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                              >
-                                {h}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-100">
-                          {suppressionData.items.map((item) => (
-                            <tr key={item.email} className="hover:bg-gray-50">
-                              <td className="px-3 py-2 text-gray-900 font-medium">
-                                {item.email}
-                              </td>
-                              <td className="px-3 py-2">
-                                <span
-                                  className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                    item.reason === "BOUNCE"
-                                      ? "bg-orange-100 text-orange-800"
-                                      : "bg-red-100 text-red-800"
-                                  }`}
-                                >
-                                  {item.reason === "BOUNCE"
-                                    ? "Bounce"
-                                    : "Reclamação"}
-                                </span>
-                              </td>
-                              <td className="px-3 py-2 text-gray-500 text-xs">
-                                {item.date
-                                  ? new Date(item.date).toLocaleString(
-                                      "pt-BR",
-                                      {
-                                        day: "2-digit",
-                                        month: "2-digit",
-                                        year: "numeric",
-                                        hour: "2-digit",
-                                        minute: "2-digit",
-                                      },
-                                    )
-                                  : "—"}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-
           {/* Summary cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
             <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
               <p className="text-sm text-gray-500 mb-1">Total enviados</p>
               <p className="text-3xl font-bold text-green-700">
@@ -592,15 +520,27 @@ export default function DashboardPage() {
               </p>
             </div>
             <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
-              <p className="text-sm text-gray-500 mb-1">Total pendentes</p>
-              <p className="text-3xl font-bold text-gray-700">
-                {loading ? "—" : pendingCount.toLocaleString("pt-BR")}
+              <p className="text-sm text-gray-500 mb-1">Para enviar</p>
+              <p className="text-3xl font-bold text-blue-700">
+                {loading ? "—" : paraEnviarCount.toLocaleString("pt-BR")}
               </p>
             </div>
             <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
               <p className="text-sm text-gray-500 mb-1">Total com erro</p>
               <p className="text-3xl font-bold text-red-700">
                 {loading ? "—" : errorCount.toLocaleString("pt-BR")}
+              </p>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
+              <p className="text-sm text-gray-500 mb-1">Duplicatas</p>
+              <p className="text-3xl font-bold text-yellow-600">
+                {loading ? "—" : duplicatasCount.toLocaleString("pt-BR")}
+              </p>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
+              <p className="text-sm text-gray-500 mb-1">Inválidos</p>
+              <p className="text-3xl font-bold text-orange-600">
+                {loading ? "—" : invalidosCount.toLocaleString("pt-BR")}
               </p>
             </div>
           </div>
@@ -645,6 +585,85 @@ export default function DashboardPage() {
                 </BarChart>
               </ResponsiveContainer>
             )}
+          </div>
+
+          {/* Quantidade por Lista */}
+          <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden mb-8">
+            <div className="px-5 py-4 border-b border-gray-200">
+              <h2 className="text-base font-semibold text-gray-900">
+                Quantidade por Lista
+              </h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Estado atual de cada lista
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    {[
+                      "Lista",
+                      "Para Enviar",
+                      "Enviados",
+                      "Erros",
+                      "Inválidos",
+                      "Duplicatas",
+                    ].map((h) => (
+                      <th
+                        key={h}
+                        className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-100">
+                  {quantidadeLoading ? (
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className="px-5 py-8 text-center text-gray-400"
+                      >
+                        Carregando...
+                      </td>
+                    </tr>
+                  ) : quantidadeStats.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className="px-5 py-8 text-center text-gray-400"
+                      >
+                        Nenhum dado encontrado.
+                      </td>
+                    </tr>
+                  ) : (
+                    quantidadeStats.map((row) => (
+                      <tr key={row.lista} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-medium text-gray-900">
+                          Plan {row.lista}
+                        </td>
+                        <td className="px-4 py-3 text-blue-700 font-medium">
+                          {Number(row.para_enviar).toLocaleString("pt-BR")}
+                        </td>
+                        <td className="px-4 py-3 text-green-700">
+                          {Number(row.enviados).toLocaleString("pt-BR")}
+                        </td>
+                        <td className="px-4 py-3 text-red-600">
+                          {Number(row.erros).toLocaleString("pt-BR")}
+                        </td>
+                        <td className="px-4 py-3 text-orange-600">
+                          {Number(row.invalidos).toLocaleString("pt-BR")}
+                        </td>
+                        <td className="px-4 py-3 text-yellow-600">
+                          {Number(row.duplicatas).toLocaleString("pt-BR")}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {/* Stats por lista com lotes expansíveis */}

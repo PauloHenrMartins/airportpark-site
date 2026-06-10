@@ -215,6 +215,29 @@ export default function ListasPage() {
               Importar lista de emails
             </h2>
 
+            {/* Explicação do processamento */}
+            <div className="bg-blue-50 border border-blue-200 rounded-md px-4 py-3 mb-5">
+              <p className="text-xs font-semibold text-blue-800 mb-1">
+                O que acontece ao importar?
+              </p>
+              <ul className="text-xs text-blue-700 space-y-1">
+                <li>
+                  <span className="font-medium">✅ Válido</span> — email com
+                  formato correto, inserido como pendente para disparo.
+                </li>
+                <li>
+                  <span className="font-medium">❌ Inválido</span> — email com
+                  formato errado (ex: sem @, com espaço, começando com ponto).
+                  Inserido como inválido, nunca será disparado.
+                </li>
+                <li>
+                  <span className="font-medium">⚠️ Duplicata</span> — email que
+                  já existe nessa lista ou que aparece mais de uma vez no
+                  arquivo. Inserido como duplicata, nunca será disparado.
+                </li>
+              </ul>
+            </div>
+
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Número da lista
