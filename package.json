@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-cloudwatch": "^3.1061.0",
+    "@aws-sdk/client-sesv2": "^3.1065.0",
     "@base-ui/react": "^1.5.0",
     "@supabase/auth-helpers-nextjs": "^0.15.0",
     "@supabase/ssr": "^0.10.3",

@@ -57,6 +57,17 @@ type HetrixData = {
   status: "clean" | "blacklisted";
 } | null;
 
+type SuppressionItem = {
+  email: string;
+  reason: "BOUNCE" | "COMPLAINT";
+  date: string | null;
+};
+
+type SuppressionData = {
+  total: number;
+  items: SuppressionItem[];
+} | null;
+
 export default function DashboardPage() {
   const [successCount, setSuccessCount] = useState(0);
   const [errorCount, setErrorCount] = useState(0);
@@ -73,6 +84,10 @@ export default function DashboardPage() {
   const [hetrixData, setHetrixData] = useState<HetrixData>(null);
   const [hetrixLoading, setHetrixLoading] = useState(true);
   const [hetrixError, setHetrixError] = useState(false);
+  const [suppressionData, setSuppressionData] = useState<SuppressionData>(null);
+  const [suppressionLoading, setSuppressionLoading] = useState(true);
+  const [suppressionError, setSuppressionError] = useState(false);
+  const [suppressionExpanded, setSuppressionExpanded] = useState(false);
 
   const supabase = createClient();
 
@@ -156,8 +171,23 @@ export default function DashboardPage() {
     }
   }
 
-  const fetchListaStats = useCallback(async () => {
-    setListaLoading(true);
+  const fetchSuppression = useCallback(async () => {
+    setSuppressionLoading(true);
+    setSuppressionError(false);
+    try {
+      const res = await fetch("/api/suppression");
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setSuppressionData(data);
+    } catch {
+      setSuppressionError(true);
+    } finally {
+      setSuppressionLoading(false);
+    }
+  }, []);
+
+  const fetchListaStats = useCallback(async (silent = false) => {
+    if (!silent) setListaLoading(true);
     try {
       const { data } = await supabase.rpc("get_stats_por_lista");
       setListaStats(data ?? []);
@@ -192,13 +222,21 @@ export default function DashboardPage() {
   useEffect(() => {
     setLoading(true);
     fetchHetrix();
-    Promise.all([
-      fetchStats(),
-      fetchChart(),
-      fetchListaStats(),
-      fetchLoteStats(),
-    ]).finally(() => setLoading(false));
-  }, [fetchStats, fetchChart, fetchListaStats, fetchLoteStats]);
+
+    async function init() {
+      // Suppression atualiza status no Supabase — deve rodar antes dos contadores
+      await fetchSuppression();
+      await Promise.all([
+        fetchStats(),
+        fetchChart(),
+        fetchListaStats(true),
+        fetchLoteStats(),
+      ]);
+      setLoading(false);
+    }
+
+    void init();
+  }, [fetchStats, fetchChart, fetchListaStats, fetchLoteStats, fetchSuppression]);
 
   return (
     <AuthGuard>
@@ -410,6 +448,137 @@ export default function DashboardPage() {
                     </div>
                   )}
                 </div>
+              )}
+            </div>
+          </div>
+
+          {/* Card Suppression List — AWS SES */}
+          <div className="bg-white border border-gray-200 rounded-lg shadow-sm mb-6">
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-900">
+                  Suprimidos — AWS SES
+                </h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Emails bloqueados por bounce ou reclamação
+                </p>
+              </div>
+            </div>
+
+            <div className="px-4 py-4">
+              {suppressionLoading && (
+                <p className="text-sm text-gray-400">Carregando...</p>
+              )}
+
+              {suppressionError && !suppressionLoading && (
+                <p className="text-sm text-red-600">
+                  Erro ao carregar suppression list.
+                </p>
+              )}
+
+              {!suppressionLoading && !suppressionError && suppressionData && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      suppressionData.total > 0 &&
+                      setSuppressionExpanded((prev) => !prev)
+                    }
+                    className={`w-full flex items-center justify-between py-2 ${
+                      suppressionData.total > 0
+                        ? "cursor-pointer hover:bg-gray-50"
+                        : "cursor-default"
+                    } rounded-md px-2 transition-colors`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {suppressionData.total > 0 && (
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className={`text-gray-400 transition-transform ${
+                            suppressionExpanded ? "rotate-90" : ""
+                          }`}
+                        >
+                          <path d="m9 18 6-6-6-6" />
+                        </svg>
+                      )}
+                      <span className="text-sm font-medium text-gray-700">
+                        Total suprimidos
+                      </span>
+                    </div>
+                    <span
+                      className={`text-sm font-bold ${
+                        suppressionData.total === 0
+                          ? "text-green-600"
+                          : "text-red-600"
+                      }`}
+                    >
+                      {suppressionData.total}
+                    </span>
+                  </button>
+
+                  {suppressionExpanded && suppressionData.total > 0 && (
+                    <div className="mt-2 overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200 text-sm">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            {["Email", "Motivo", "Data"].map((h) => (
+                              <th
+                                key={h}
+                                className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                              >
+                                {h}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-100">
+                          {suppressionData.items.map((item) => (
+                            <tr key={item.email} className="hover:bg-gray-50">
+                              <td className="px-3 py-2 text-gray-900 font-medium">
+                                {item.email}
+                              </td>
+                              <td className="px-3 py-2">
+                                <span
+                                  className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                                    item.reason === "BOUNCE"
+                                      ? "bg-orange-100 text-orange-800"
+                                      : "bg-red-100 text-red-800"
+                                  }`}
+                                >
+                                  {item.reason === "BOUNCE"
+                                    ? "Bounce"
+                                    : "Reclamação"}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-gray-500 text-xs">
+                                {item.date
+                                  ? new Date(item.date).toLocaleString(
+                                      "pt-BR",
+                                      {
+                                        day: "2-digit",
+                                        month: "2-digit",
+                                        year: "numeric",
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                      },
+                                    )
+                                  : "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>
