@@ -5,12 +5,13 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase";
-import { LayoutDashboard, Send, Filter, LogOut, Menu, X } from "lucide-react";
+import { LayoutDashboard, Send, Filter, Upload, LogOut, Menu, X } from "lucide-react";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/disparar", label: "Disparar", icon: Send },
   { href: "/provedores", label: "Provedores", icon: Filter },
+  { href: "/listas", label: "Listas", icon: Upload },
 ];
 
 export default function Sidebar() {
@@ -35,7 +36,9 @@ export default function Sidebar() {
         ? "Disparar"
         : pathname === "/provedores"
           ? "Provedores"
-          : "";
+          : pathname === "/listas"
+            ? "Listas"
+            : "";
 
   const sidebarContent = (
     <div className="flex flex-col h-full">

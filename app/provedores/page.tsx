@@ -6,6 +6,7 @@ import { useState, useEffect } from "react";
 import Sidebar from "@/components/Sidebar";
 import AuthGuard from "@/components/AuthGuard";
 import { createClient } from "@/lib/supabase";
+import { fetchListasDisponiveis } from "@/lib/fetch-listas";
 
 type ProvedorRow = {
   dominio: string;
@@ -26,21 +27,10 @@ export default function ProvedoresPage() {
   // Busca listas disponíveis ao montar a página
   useEffect(() => {
     async function fetchListas() {
-      const supabase = createClient();
-      const { data } = await supabase
-        .from("email_lista")
-        .select("lista")
-        .order("lista", { ascending: true });
-
-      if (data) {
-        const unique = data
-          .map((r: { lista: number }) => r.lista)
-          .filter((v: number, i: number, a: number[]) => a.indexOf(v) === i)
-          .sort((a: number, b: number) => a - b);
-        setListas(unique);
-        if (unique.length > 0) {
-          setListaSelecionada(String(unique[0]));
-        }
+      const unique = await fetchListasDisponiveis();
+      setListas(unique);
+      if (unique.length > 0) {
+        setListaSelecionada(String(unique[0]));
       }
     }
     fetchListas();
