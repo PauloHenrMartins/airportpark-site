@@ -36,6 +36,8 @@ async function getMetric(metricName: string, days = 30): Promise<number> {
   }
 }
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const [sends, deliveries, opens, clicks, bounces, complaints] =
     await Promise.all([

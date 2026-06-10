@@ -48,6 +48,15 @@ type LoteStat = {
   erros: number;
 };
 
+type HetrixData = {
+  domain: string;
+  label: string;
+  blacklistedCount: number;
+  blacklistedOn: string[];
+  totalRbls: number;
+  status: "clean" | "blacklisted";
+} | null;
+
 export default function DashboardPage() {
   const [successCount, setSuccessCount] = useState(0);
   const [errorCount, setErrorCount] = useState(0);
@@ -61,6 +70,9 @@ export default function DashboardPage() {
   const [loteStats, setLoteStats] = useState<LoteStat[]>([]);
   const [expandedListas, setExpandedListas] = useState<Set<number>>(new Set());
   const [bounceTooltip, setBounceTooltip] = useState(false);
+  const [hetrixData, setHetrixData] = useState<HetrixData>(null);
+  const [hetrixLoading, setHetrixLoading] = useState(true);
+  const [hetrixError, setHetrixError] = useState(false);
 
   const supabase = createClient();
 
@@ -129,6 +141,21 @@ export default function DashboardPage() {
     }
   }
 
+  async function fetchHetrix() {
+    setHetrixLoading(true);
+    setHetrixError(false);
+    try {
+      const res = await fetch("/api/hetrix");
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setHetrixData(data);
+    } catch {
+      setHetrixError(true);
+    } finally {
+      setHetrixLoading(false);
+    }
+  }
+
   const fetchListaStats = useCallback(async () => {
     setListaLoading(true);
     try {
@@ -164,6 +191,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     setLoading(true);
+    fetchHetrix();
     Promise.all([
       fetchStats(),
       fetchChart(),
@@ -303,6 +331,84 @@ export default function DashboardPage() {
                       {awsMetrics.complaintRate}%
                     </p>
                   </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Card Blacklist Monitor — HetrixTools */}
+          <div className="bg-white border border-gray-200 rounded-lg shadow-sm mb-6">
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-900">
+                  Blacklist Monitor — HetrixTools
+                </h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Verificação de listas negras de email
+                </p>
+              </div>
+              {hetrixData && (
+                <span className="text-xs text-gray-400">
+                  {hetrixData.domain}
+                </span>
+              )}
+            </div>
+
+            <div className="px-4 py-4">
+              {hetrixLoading && (
+                <p className="text-sm text-gray-400">Carregando...</p>
+              )}
+
+              {hetrixError && !hetrixLoading && (
+                <p className="text-sm text-red-600">
+                  Erro ao carregar dados do HetrixTools.
+                </p>
+              )}
+
+              {!hetrixLoading && !hetrixError && hetrixData && (
+                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                        hetrixData.status === "clean"
+                          ? "bg-green-100"
+                          : "bg-red-100"
+                      }`}
+                    >
+                      {hetrixData.status === "clean" ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-green-600">
+                          <path d="M20 6 9 17l-5-5"/>
+                        </svg>
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-600">
+                          <path d="M18 6 6 18M6 6l12 12"/>
+                        </svg>
+                      )}
+                    </div>
+                    <div>
+                      <p className={`text-base font-bold ${
+                        hetrixData.status === "clean" ? "text-green-700" : "text-red-700"
+                      }`}>
+                        {hetrixData.status === "clean" ? "Domínio Limpo" : `Listado em ${hetrixData.blacklistedCount} blacklist${hetrixData.blacklistedCount > 1 ? "s" : ""}`}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {hetrixData.totalRbls} blacklists verificadas
+                      </p>
+                    </div>
+                  </div>
+
+                  {hetrixData.blacklistedOn.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 sm:ml-4">
+                      {hetrixData.blacklistedOn.map((rbl) => (
+                        <span
+                          key={rbl}
+                          className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800"
+                        >
+                          {rbl}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
