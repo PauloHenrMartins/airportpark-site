@@ -18,6 +18,20 @@ import { createClient } from "@/lib/supabase";
 
 type DayCount = { date: string; total: number };
 
+type DisparoDiaRow = { dia: string; total: number };
+
+/** Converte "2025-06-25" (date do RPC) para "25/06" no gráfico. */
+function formatDiaLabel(isoDate: string): string {
+  const [, month, day] = isoDate.split("T")[0].split("-").map(Number);
+  return `${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}`;
+}
+
+function sortDayCounts(a: DayCount, b: DayCount): number {
+  const [da, ma] = a.date.split("/").map(Number);
+  const [db, mb] = b.date.split("/").map(Number);
+  return ma !== mb ? ma - mb : da - db;
+}
+
 type AwsMetrics = {
   sends: number;
   deliveries: number;
@@ -51,11 +65,37 @@ type LoteStat = {
 type QuantidadeStat = {
   lista: number;
   para_enviar: number;
+  bloqueados_provedor: number;
   enviados: number;
   erros: number;
   invalidos: number;
   duplicatas: number;
+  total: number;
 };
+
+function somarQuantidadeStats(rows: QuantidadeStat[]): Omit<QuantidadeStat, "lista"> {
+  return rows.reduce(
+    (acc, row) => ({
+      para_enviar: acc.para_enviar + Number(row.para_enviar),
+      bloqueados_provedor:
+        acc.bloqueados_provedor + Number(row.bloqueados_provedor ?? 0),
+      enviados: acc.enviados + Number(row.enviados),
+      erros: acc.erros + Number(row.erros),
+      invalidos: acc.invalidos + Number(row.invalidos),
+      duplicatas: acc.duplicatas + Number(row.duplicatas),
+      total: acc.total + Number(row.total ?? 0),
+    }),
+    {
+      para_enviar: 0,
+      bloqueados_provedor: 0,
+      enviados: 0,
+      erros: 0,
+      invalidos: 0,
+      duplicatas: 0,
+      total: 0,
+    },
+  );
+}
 
 type HetrixData = {
   domain: string;
@@ -103,7 +143,7 @@ export default function DashboardPage() {
   const supabase = createClient();
 
   const fetchStats = useCallback(async () => {
-    const [successRes, errorRes, paraEnviarRes, duplicatasRes, invalidosRes] =
+    const [successRes, errorRes, duplicatasRes, invalidosRes] =
       await Promise.all([
         supabase
           .from("email_lista")
@@ -116,11 +156,6 @@ export default function DashboardPage() {
         supabase
           .from("email_lista")
           .select("id", { count: "exact", head: true })
-          .is("enviado_em", null)
-          .is("status", null),
-        supabase
-          .from("email_lista")
-          .select("id", { count: "exact", head: true })
           .eq("status", "duplicate"),
         supabase
           .from("email_lista")
@@ -129,39 +164,66 @@ export default function DashboardPage() {
       ]);
     setSuccessCount(successRes.count ?? 0);
     setErrorCount(errorRes.count ?? 0);
-    setParaEnviarCount(paraEnviarRes.count ?? 0);
     setDuplicatasCount(duplicatasRes.count ?? 0);
     setInvalidosCount(invalidosRes.count ?? 0);
   }, [supabase]);
 
   const fetchChart = useCallback(async () => {
+    const DIAS = 30;
+
+    // Agregação no banco evita o limite padrão de 1000 linhas do PostgREST.
+    const { data: rpcData, error: rpcError } = await supabase.rpc(
+      "get_disparos_por_dia",
+      { p_dias: DIAS },
+    );
+
+    if (!rpcError && rpcData) {
+      const sorted = (rpcData as DisparoDiaRow[])
+        .map(({ dia, total }) => ({
+          date: formatDiaLabel(dia),
+          total: Number(total),
+        }))
+        .sort(sortDayCounts);
+      setChartData(sorted);
+      return;
+    }
+
+    // Fallback: pagina em lotes de 1000 até cobrir todos os registros.
     const since = new Date();
-    since.setDate(since.getDate() - 30);
-
-    const { data } = await supabase
-      .from("email_lista")
-      .select("enviado_em")
-      .gte("enviado_em", since.toISOString())
-      .not("enviado_em", "is", null);
-
-    if (!data) return;
+    since.setDate(since.getDate() - DIAS);
 
     const counts: Record<string, number> = {};
-    data.forEach((row: { enviado_em: string | null }) => {
-      const day = new Date(row.enviado_em!).toLocaleDateString("pt-BR", {
-        day: "2-digit",
-        month: "2-digit",
-      });
-      counts[day] = (counts[day] ?? 0) + 1;
-    });
+    const PAGE_SIZE = 1000;
+    let from = 0;
+
+    while (true) {
+      const { data, error } = await supabase
+        .from("email_lista")
+        .select("enviado_em")
+        .gte("enviado_em", since.toISOString())
+        .not("enviado_em", "is", null)
+        .order("enviado_em", { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (error || !data || data.length === 0) break;
+
+      for (const row of data) {
+        const enviadoEm = row.enviado_em;
+        if (!enviadoEm) continue;
+        const day = new Date(enviadoEm).toLocaleDateString("pt-BR", {
+          day: "2-digit",
+          month: "2-digit",
+        });
+        counts[day] = (counts[day] ?? 0) + 1;
+      }
+
+      if (data.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
+    }
 
     const sorted = Object.entries(counts)
       .map(([date, total]) => ({ date, total }))
-      .sort((a, b) => {
-        const [da, ma] = a.date.split("/").map(Number);
-        const [db, mb] = b.date.split("/").map(Number);
-        return ma !== mb ? ma - mb : da - db;
-      });
+      .sort(sortDayCounts);
 
     setChartData(sorted);
   }, [supabase]);
@@ -232,7 +294,12 @@ export default function DashboardPage() {
   const fetchQuantidadeStats = useCallback(async () => {
     try {
       const { data } = await supabase.rpc("get_quantidade_por_lista");
-      setQuantidadeStats(data ?? []);
+      const rows = (data ?? []) as QuantidadeStat[];
+      setQuantidadeStats(rows);
+      // Card "Para enviar" usa a mesma regra da tabela (provedores permitidos).
+      setParaEnviarCount(
+        rows.reduce((acc, row) => acc + Number(row.para_enviar), 0),
+      );
     } catch {
       // silencia erro
     } finally {
@@ -278,6 +345,8 @@ export default function DashboardPage() {
     fetchQuantidadeStats,
     fetchSuppression,
   ]);
+
+  const quantidadeTotais = somarQuantidadeStats(quantidadeStats);
 
   return (
     <AuthGuard>
@@ -592,7 +661,8 @@ export default function DashboardPage() {
                 Quantidade por Lista
               </h2>
               <p className="text-xs text-gray-500 mt-0.5">
-                Estado atual de cada lista
+                Para Enviar = provedores ativos · Bloq. Provedor = pendentes
+                com provedor desativado · Total = todos os emails da lista
               </p>
             </div>
             <div className="overflow-x-auto">
@@ -602,10 +672,12 @@ export default function DashboardPage() {
                     {[
                       "Lista",
                       "Para Enviar",
+                      "Bloq. Provedor",
                       "Enviados",
                       "Erros",
                       "Inválidos",
                       "Duplicatas",
+                      "Total",
                     ].map((h) => (
                       <th
                         key={h}
@@ -620,7 +692,7 @@ export default function DashboardPage() {
                   {quantidadeLoading ? (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={8}
                         className="px-5 py-8 text-center text-gray-400"
                       >
                         Carregando...
@@ -629,35 +701,73 @@ export default function DashboardPage() {
                   ) : quantidadeStats.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={8}
                         className="px-5 py-8 text-center text-gray-400"
                       >
                         Nenhum dado encontrado.
                       </td>
                     </tr>
                   ) : (
-                    quantidadeStats.map((row) => (
-                      <tr key={row.lista} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-medium text-gray-900">
-                          Plan {row.lista}
+                    <>
+                      {quantidadeStats.map((row) => (
+                        <tr key={row.lista} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 font-medium text-gray-900">
+                            Plan {row.lista}
+                          </td>
+                          <td className="px-4 py-3 text-blue-700 font-medium">
+                            {Number(row.para_enviar).toLocaleString("pt-BR")}
+                          </td>
+                          <td className="px-4 py-3 text-gray-500">
+                            {Number(
+                              row.bloqueados_provedor ?? 0,
+                            ).toLocaleString("pt-BR")}
+                          </td>
+                          <td className="px-4 py-3 text-green-700">
+                            {Number(row.enviados).toLocaleString("pt-BR")}
+                          </td>
+                          <td className="px-4 py-3 text-red-600">
+                            {Number(row.erros).toLocaleString("pt-BR")}
+                          </td>
+                          <td className="px-4 py-3 text-orange-600">
+                            {Number(row.invalidos).toLocaleString("pt-BR")}
+                          </td>
+                          <td className="px-4 py-3 text-yellow-600">
+                            {Number(row.duplicatas).toLocaleString("pt-BR")}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-gray-900">
+                            {Number(row.total ?? 0).toLocaleString("pt-BR")}
+                          </td>
+                        </tr>
+                      ))}
+                      <tr className="bg-gray-100 border-t-2 border-gray-300">
+                        <td className="px-4 py-3 font-bold text-gray-900">
+                          Total
                         </td>
-                        <td className="px-4 py-3 text-blue-700 font-medium">
-                          {Number(row.para_enviar).toLocaleString("pt-BR")}
+                        <td className="px-4 py-3 font-bold text-blue-800">
+                          {quantidadeTotais.para_enviar.toLocaleString("pt-BR")}
                         </td>
-                        <td className="px-4 py-3 text-green-700">
-                          {Number(row.enviados).toLocaleString("pt-BR")}
+                        <td className="px-4 py-3 font-bold text-gray-700">
+                          {quantidadeTotais.bloqueados_provedor.toLocaleString(
+                            "pt-BR",
+                          )}
                         </td>
-                        <td className="px-4 py-3 text-red-600">
-                          {Number(row.erros).toLocaleString("pt-BR")}
+                        <td className="px-4 py-3 font-bold text-green-800">
+                          {quantidadeTotais.enviados.toLocaleString("pt-BR")}
                         </td>
-                        <td className="px-4 py-3 text-orange-600">
-                          {Number(row.invalidos).toLocaleString("pt-BR")}
+                        <td className="px-4 py-3 font-bold text-red-700">
+                          {quantidadeTotais.erros.toLocaleString("pt-BR")}
                         </td>
-                        <td className="px-4 py-3 text-yellow-600">
-                          {Number(row.duplicatas).toLocaleString("pt-BR")}
+                        <td className="px-4 py-3 font-bold text-orange-700">
+                          {quantidadeTotais.invalidos.toLocaleString("pt-BR")}
+                        </td>
+                        <td className="px-4 py-3 font-bold text-yellow-700">
+                          {quantidadeTotais.duplicatas.toLocaleString("pt-BR")}
+                        </td>
+                        <td className="px-4 py-3 font-bold text-gray-900 text-base">
+                          {quantidadeTotais.total.toLocaleString("pt-BR")}
                         </td>
                       </tr>
-                    ))
+                    </>
                   )}
                 </tbody>
               </table>

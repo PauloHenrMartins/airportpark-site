@@ -18,14 +18,19 @@
 Rodar no SQL Editor do Supabase:
 
 ```sql
+-- Ao alterar colunas de retorno, dropar antes de recriar:
+DROP FUNCTION IF EXISTS get_quantidade_por_lista();
+
 CREATE OR REPLACE FUNCTION get_quantidade_por_lista()
 RETURNS TABLE(
   lista integer,
   para_enviar bigint,
+  bloqueados_provedor bigint,
   enviados bigint,
   erros bigint,
   invalidos bigint,
-  duplicatas bigint
+  duplicatas bigint,
+  total bigint
 )
 LANGUAGE plpgsql
 AS $$
@@ -33,11 +38,33 @@ BEGIN
   RETURN QUERY
   SELECT
     el.lista,
-    COUNT(*) FILTER (WHERE el.enviado_em IS NULL AND el.status IS NULL) AS para_enviar,
+    COUNT(*) FILTER (
+      WHERE el.enviado_em IS NULL
+        AND el.status IS NULL
+        AND EXISTS (
+          SELECT 1
+          FROM lista_provedores lp
+          WHERE lp.lista = el.lista
+            AND lp.dominio = SPLIT_PART(el.email, '@', 2)
+            AND lp.permitido = true
+        )
+    ) AS para_enviar,
+    COUNT(*) FILTER (
+      WHERE el.enviado_em IS NULL
+        AND el.status IS NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lista_provedores lp
+          WHERE lp.lista = el.lista
+            AND lp.dominio = SPLIT_PART(el.email, '@', 2)
+            AND lp.permitido = true
+        )
+    ) AS bloqueados_provedor,
     COUNT(*) FILTER (WHERE el.status = 'success') AS enviados,
     COUNT(*) FILTER (WHERE el.status = 'error') AS erros,
     COUNT(*) FILTER (WHERE el.status = 'invalid') AS invalidos,
-    COUNT(*) FILTER (WHERE el.status = 'duplicate') AS duplicatas
+    COUNT(*) FILTER (WHERE el.status = 'duplicate') AS duplicatas,
+    COUNT(*) AS total
   FROM email_lista el
   GROUP BY el.lista
   ORDER BY el.lista DESC;
